@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2014 the original author or authors.
+ * Copyright 2002-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,15 +22,20 @@ import java.util.BitSet;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TreeSet;
 
+import org.springframework.lang.Nullable;
+
 /**
  * Represents a MIME Type, as originally defined in RFC 2046 and subsequently used in
- * other Internet protocols including HTTP. This class however does not contain support
- * the q-parameters used in HTTP content negotiation. Those can be found in the sub-class
+ * other Internet protocols including HTTP.
+ *
+ * <p>This class, however, does not contain support for the q-parameters used
+ * in HTTP content negotiation. Those can be found in the sub-class
  * {@code org.springframework.http.MediaType} in the {@code spring-web} module.
  *
  * <p>Consists of a {@linkplain #getType() type} and a {@linkplain #getSubtype() subtype}.
@@ -40,6 +45,7 @@ import java.util.TreeSet;
  * @author Arjen Poutsma
  * @author Juergen Hoeller
  * @author Rossen Stoyanchev
+ * @author Sam Brannen
  * @since 4.0
  * @see MimeTypeUtils
  */
@@ -47,19 +53,12 @@ public class MimeType implements Comparable<MimeType>, Serializable {
 
 	private static final long serialVersionUID = 4085923477777865903L;
 
-	protected static final String WILDCARD_TYPE = "*";
 
-	private static final BitSet TOKEN;
+	protected static final String WILDCARD_TYPE = "*";
 
 	private static final String PARAM_CHARSET = "charset";
 
-
-	private final String type;
-
-	private final String subtype;
-
-	private final Map<String, String> parameters;
-
+	private static final BitSet TOKEN;
 
 	static {
 		// variable names refer to RFC 2616, section 2.2
@@ -97,11 +96,19 @@ public class MimeType implements Comparable<MimeType>, Serializable {
 	}
 
 
+	private final String type;
+
+	private final String subtype;
+
+	private final Map<String, String> parameters;
+
+
 	/**
 	 * Create a new {@code MimeType} for the given primary type.
-	 * <p>The {@linkplain #getSubtype() subtype} is set to "&#42;", parameters empty.
+	 * <p>The {@linkplain #getSubtype() subtype} is set to <code>"&#42;"</code>,
+	 * and the parameters are empty.
 	 * @param type the primary type
-	 * @throws IllegalArgumentException if any of the parameters contain illegal characters
+	 * @throws IllegalArgumentException if any of the parameters contains illegal characters
 	 */
 	public MimeType(String type) {
 		this(type, WILDCARD_TYPE);
@@ -112,21 +119,33 @@ public class MimeType implements Comparable<MimeType>, Serializable {
 	 * <p>The parameters are empty.
 	 * @param type the primary type
 	 * @param subtype the subtype
-	 * @throws IllegalArgumentException if any of the parameters contain illegal characters
+	 * @throws IllegalArgumentException if any of the parameters contains illegal characters
 	 */
 	public MimeType(String type, String subtype) {
-		this(type, subtype, Collections.<String, String>emptyMap());
+		this(type, subtype, Collections.emptyMap());
 	}
 
 	/**
 	 * Create a new {@code MimeType} for the given type, subtype, and character set.
 	 * @param type the primary type
 	 * @param subtype the subtype
-	 * @param charSet the character set
-	 * @throws IllegalArgumentException if any of the parameters contain illegal characters
+	 * @param charset the character set
+	 * @throws IllegalArgumentException if any of the parameters contains illegal characters
 	 */
-	public MimeType(String type, String subtype, Charset charSet) {
-		this(type, subtype, Collections.singletonMap(PARAM_CHARSET, charSet.name()));
+	public MimeType(String type, String subtype, Charset charset) {
+		this(type, subtype, Collections.singletonMap(PARAM_CHARSET, charset.name()));
+	}
+
+	/**
+	 * Copy-constructor that copies the type, subtype, parameters of the given {@code MimeType},
+	 * and allows to set the specified character set.
+	 * @param other the other media type
+	 * @param charset the character set
+	 * @throws IllegalArgumentException if any of the parameters contains illegal characters
+	 * @since 4.3
+	 */
+	public MimeType(MimeType other, Charset charset) {
+		this(other.getType(), other.getSubtype(), addCharsetParameter(charset, other.getParameters()));
 	}
 
 	/**
@@ -134,9 +153,9 @@ public class MimeType implements Comparable<MimeType>, Serializable {
 	 * and allows for different parameter.
 	 * @param other the other media type
 	 * @param parameters the parameters, may be {@code null}
-	 * @throws IllegalArgumentException if any of the parameters contain illegal characters
+	 * @throws IllegalArgumentException if any of the parameters contains illegal characters
 	 */
-	public MimeType(MimeType other, Map<String, String> parameters) {
+	public MimeType(MimeType other, @Nullable Map<String, String> parameters) {
 		this(other.getType(), other.getSubtype(), parameters);
 	}
 
@@ -145,23 +164,21 @@ public class MimeType implements Comparable<MimeType>, Serializable {
 	 * @param type the primary type
 	 * @param subtype the subtype
 	 * @param parameters the parameters, may be {@code null}
-	 * @throws IllegalArgumentException if any of the parameters contain illegal characters
+	 * @throws IllegalArgumentException if any of the parameters contains illegal characters
 	 */
-	public MimeType(String type, String subtype, Map<String, String> parameters) {
-		Assert.hasLength(type, "type must not be empty");
-		Assert.hasLength(subtype, "subtype must not be empty");
+	public MimeType(String type, String subtype, @Nullable Map<String, String> parameters) {
+		Assert.hasLength(type, "'type' must not be empty");
+		Assert.hasLength(subtype, "'subtype' must not be empty");
 		checkToken(type);
 		checkToken(subtype);
 		this.type = type.toLowerCase(Locale.ENGLISH);
 		this.subtype = subtype.toLowerCase(Locale.ENGLISH);
 		if (!CollectionUtils.isEmpty(parameters)) {
-			Map<String, String> map = new LinkedCaseInsensitiveMap<String>(parameters.size(), Locale.ENGLISH);
-			for (Map.Entry<String, String> entry : parameters.entrySet()) {
-				String attribute = entry.getKey();
-				String value = entry.getValue();
+			Map<String, String> map = new LinkedCaseInsensitiveMap<>(parameters.size(), Locale.ENGLISH);
+			parameters.forEach((attribute, value) -> {
 				checkParameters(attribute, value);
 				map.put(attribute, value);
-			}
+			});
 			this.parameters = Collections.unmodifiableMap(map);
 		}
 		else {
@@ -176,7 +193,7 @@ public class MimeType implements Comparable<MimeType>, Serializable {
 	 * @see <a href="http://tools.ietf.org/html/rfc2616#section-2.2">HTTP 1.1, section 2.2</a>
 	 */
 	private void checkToken(String token) {
-		for (int i=0; i < token.length(); i++ ) {
+		for (int i = 0; i < token.length(); i++ ) {
 			char ch = token.charAt(i);
 			if (!TOKEN.get(ch)) {
 				throw new IllegalArgumentException("Invalid token character '" + ch + "' in token \"" + token + "\"");
@@ -185,8 +202,8 @@ public class MimeType implements Comparable<MimeType>, Serializable {
 	}
 
 	protected void checkParameters(String attribute, String value) {
-		Assert.hasLength(attribute, "parameter attribute must not be empty");
-		Assert.hasLength(value, "parameter value must not be empty");
+		Assert.hasLength(attribute, "'attribute' must not be empty");
+		Assert.hasLength(value, "'value' must not be empty");
 		checkToken(attribute);
 		if (PARAM_CHARSET.equals(attribute)) {
 			value = unquote(value);
@@ -207,33 +224,30 @@ public class MimeType implements Comparable<MimeType>, Serializable {
 	}
 
 	protected String unquote(String s) {
-		if (s == null) {
-			return null;
-		}
-		return isQuotedString(s) ? s.substring(1, s.length() - 1) : s;
+		return (isQuotedString(s) ? s.substring(1, s.length() - 1) : s);
 	}
 
 	/**
 	 * Indicates whether the {@linkplain #getType() type} is the wildcard character
-	 * {@code &#42;} or not.
+	 * <code>&#42;</code> or not.
 	 */
 	public boolean isWildcardType() {
 		return WILDCARD_TYPE.equals(getType());
 	}
 
 	/**
-	 * Indicates whether the {@linkplain #getSubtype() subtype} is the wildcard character
-	 * {@code &#42;} or the wildcard character followed by a sufiix (e.g.
-	 * {@code &#42;+xml}), or not.
-	 * @return whether the subtype is {@code &#42;}
+	 * Indicates whether the {@linkplain #getSubtype() subtype} is the wildcard
+	 * character <code>&#42;</code> or the wildcard character followed by a suffix
+	 * (e.g. <code>&#42;+xml</code>).
+	 * @return whether the subtype is a wildcard
 	 */
 	public boolean isWildcardSubtype() {
 		return WILDCARD_TYPE.equals(getSubtype()) || getSubtype().startsWith("*+");
 	}
 
 	/**
-	 * Indicates whether this media type is concrete, i.e. whether neither the type or
-	 * subtype is a wildcard character {@code &#42;}.
+	 * Indicates whether this media type is concrete, i.e. whether neither the type
+	 * nor the subtype is a wildcard character <code>&#42;</code>.
 	 * @return whether this media type is concrete
 	 */
 	public boolean isConcrete() {
@@ -257,10 +271,12 @@ public class MimeType implements Comparable<MimeType>, Serializable {
 	/**
 	 * Return the character set, as indicated by a {@code charset} parameter, if any.
 	 * @return the character set, or {@code null} if not available
+	 * @since 4.3
 	 */
-	public Charset getCharSet() {
-		String charSet = getParameter(PARAM_CHARSET);
-		return (charSet != null ? Charset.forName(unquote(charSet)) : null);
+	@Nullable
+	public Charset getCharset() {
+		String charset = getParameter(PARAM_CHARSET);
+		return (charset != null ? Charset.forName(unquote(charset)) : null);
 	}
 
 	/**
@@ -268,6 +284,7 @@ public class MimeType implements Comparable<MimeType>, Serializable {
 	 * @param name the parameter name
 	 * @return the parameter value, or {@code null} if not present
 	 */
+	@Nullable
 	public String getParameter(String name) {
 		return this.parameters.get(name);
 	}
@@ -289,7 +306,7 @@ public class MimeType implements Comparable<MimeType>, Serializable {
 	 * @return {@code true} if this media type includes the given media type;
 	 * {@code false} otherwise
 	 */
-	public boolean includes(MimeType other) {
+	public boolean includes(@Nullable MimeType other) {
 		if (other == null) {
 			return false;
 		}
@@ -303,13 +320,13 @@ public class MimeType implements Comparable<MimeType>, Serializable {
 			}
 			if (this.isWildcardSubtype()) {
 				// wildcard with suffix, e.g. application/*+xml
-				int thisPlusIdx = getSubtype().indexOf('+');
+				int thisPlusIdx = getSubtype().lastIndexOf('+');
 				if (thisPlusIdx == -1) {
 					return true;
 				}
 				else {
 					// application/*+xml includes application/soap+xml
-					int otherPlusIdx = other.getSubtype().indexOf('+');
+					int otherPlusIdx = other.getSubtype().lastIndexOf('+');
 					if (otherPlusIdx != -1) {
 						String thisSubtypeNoSuffix = getSubtype().substring(0, thisPlusIdx);
 						String thisSubtypeSuffix = getSubtype().substring(thisPlusIdx + 1);
@@ -333,7 +350,7 @@ public class MimeType implements Comparable<MimeType>, Serializable {
 	 * @return {@code true} if this media type is compatible with the given media type;
 	 * {@code false} otherwise
 	 */
-	public boolean isCompatibleWith(MimeType other) {
+	public boolean isCompatibleWith(@Nullable MimeType other) {
 		if (other == null) {
 			return false;
 		}
@@ -347,8 +364,8 @@ public class MimeType implements Comparable<MimeType>, Serializable {
 			// wildcard with suffix? e.g. application/*+xml
 			if (this.isWildcardSubtype() || other.isWildcardSubtype()) {
 
-				int thisPlusIdx = getSubtype().indexOf('+');
-				int otherPlusIdx = other.getSubtype().indexOf('+');
+				int thisPlusIdx = getSubtype().lastIndexOf('+');
+				int otherPlusIdx = other.getSubtype().lastIndexOf('+');
 
 				if (thisPlusIdx == -1 && otherPlusIdx == -1) {
 					return true;
@@ -370,50 +387,6 @@ public class MimeType implements Comparable<MimeType>, Serializable {
 		return false;
 	}
 
-	/**
-	 * Compares this {@code MediaType} to another alphabetically.
-	 * @param other media type to compare to
-	 * @see MimeTypeUtils#sortBySpecificity(List)
-	 */
-	@Override
-	public int compareTo(MimeType other) {
-		int comp = getType().compareToIgnoreCase(other.getType());
-		if (comp != 0) {
-			return comp;
-		}
-		comp = getSubtype().compareToIgnoreCase(other.getSubtype());
-		if (comp != 0) {
-			return comp;
-		}
-		comp = getParameters().size() - other.getParameters().size();
-		if (comp != 0) {
-			return comp;
-		}
-		TreeSet<String> thisAttributes = new TreeSet<String>(String.CASE_INSENSITIVE_ORDER);
-		thisAttributes.addAll(getParameters().keySet());
-		TreeSet<String> otherAttributes = new TreeSet<String>(String.CASE_INSENSITIVE_ORDER);
-		otherAttributes.addAll(other.getParameters().keySet());
-		Iterator<String> thisAttributesIterator = thisAttributes.iterator();
-		Iterator<String> otherAttributesIterator = otherAttributes.iterator();
-		while (thisAttributesIterator.hasNext()) {
-			String thisAttribute = thisAttributesIterator.next();
-			String otherAttribute = otherAttributesIterator.next();
-			comp = thisAttribute.compareToIgnoreCase(otherAttribute);
-			if (comp != 0) {
-				return comp;
-			}
-			String thisValue = getParameters().get(thisAttribute);
-			String otherValue = other.getParameters().get(otherAttribute);
-			if (otherValue == null) {
-				otherValue = "";
-			}
-			comp = thisValue.compareTo(otherValue);
-			if (comp != 0) {
-				return comp;
-			}
-		}
-		return 0;
-	}
 
 	@Override
 	public boolean equals(Object other) {
@@ -426,7 +399,36 @@ public class MimeType implements Comparable<MimeType>, Serializable {
 		MimeType otherType = (MimeType) other;
 		return (this.type.equalsIgnoreCase(otherType.type) &&
 				this.subtype.equalsIgnoreCase(otherType.subtype) &&
-				this.parameters.equals(otherType.parameters));
+				parametersAreEqual(otherType));
+	}
+
+	/**
+	 * Determine if the parameters in this {@code MimeType} and the supplied
+	 * {@code MimeType} are equal, performing case-insensitive comparisons
+	 * for {@link Charset}s.
+	 * @since 4.2
+	 */
+	private boolean parametersAreEqual(MimeType other) {
+		if (this.parameters.size() != other.parameters.size()) {
+			return false;
+		}
+
+		for (String key : this.parameters.keySet()) {
+			if (!other.parameters.containsKey(key)) {
+				return false;
+			}
+
+			if (PARAM_CHARSET.equals(key)) {
+				if (!ObjectUtils.nullSafeEquals(getCharset(), other.getCharset())) {
+					return false;
+				}
+			}
+			else if (!ObjectUtils.nullSafeEquals(this.parameters.get(key), other.parameters.get(key))) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	@Override
@@ -452,13 +454,59 @@ public class MimeType implements Comparable<MimeType>, Serializable {
 	}
 
 	private void appendTo(Map<String, String> map, StringBuilder builder) {
-		for (Map.Entry<String, String> entry : map.entrySet()) {
+		map.forEach((key, val) -> {
 			builder.append(';');
-			builder.append(entry.getKey());
+			builder.append(key);
 			builder.append('=');
-			builder.append(entry.getValue());
-		}
+			builder.append(val);
+		});
 	}
+
+	/**
+	 * Compares this {@code MediaType} to another alphabetically.
+	 * @param other media type to compare to
+	 * @see MimeTypeUtils#sortBySpecificity(List)
+	 */
+	@Override
+	public int compareTo(MimeType other) {
+		int comp = getType().compareToIgnoreCase(other.getType());
+		if (comp != 0) {
+			return comp;
+		}
+		comp = getSubtype().compareToIgnoreCase(other.getSubtype());
+		if (comp != 0) {
+			return comp;
+		}
+		comp = getParameters().size() - other.getParameters().size();
+		if (comp != 0) {
+			return comp;
+		}
+		TreeSet<String> thisAttributes = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+		thisAttributes.addAll(getParameters().keySet());
+		TreeSet<String> otherAttributes = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+		otherAttributes.addAll(other.getParameters().keySet());
+		Iterator<String> thisAttributesIterator = thisAttributes.iterator();
+		Iterator<String> otherAttributesIterator = otherAttributes.iterator();
+		while (thisAttributesIterator.hasNext()) {
+			String thisAttribute = thisAttributesIterator.next();
+			String otherAttribute = otherAttributesIterator.next();
+			comp = thisAttribute.compareToIgnoreCase(otherAttribute);
+			if (comp != 0) {
+				return comp;
+			}
+			String thisValue = getParameters().get(thisAttribute);
+			String otherValue = other.getParameters().get(otherAttribute);
+			if (otherValue == null) {
+				otherValue = "";
+			}
+			comp = thisValue.compareTo(otherValue);
+			if (comp != 0) {
+				return comp;
+			}
+		}
+		return 0;
+	}
+
 
 	/**
 	 * Parse the given String value into a {@code MimeType} object,
@@ -468,6 +516,12 @@ public class MimeType implements Comparable<MimeType>, Serializable {
 	 */
 	public static MimeType valueOf(String value) {
 		return MimeTypeUtils.parseMimeType(value);
+	}
+
+	private static Map<String, String> addCharsetParameter(Charset charset, Map<String, String> parameters) {
+		Map<String, String> map = new LinkedHashMap<>(parameters);
+		map.put(PARAM_CHARSET, charset.name());
+		return map;
 	}
 
 

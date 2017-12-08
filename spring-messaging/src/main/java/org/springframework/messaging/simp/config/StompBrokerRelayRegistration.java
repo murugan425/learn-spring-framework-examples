@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2013 the original author or authors.
+ * Copyright 2002-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 
 package org.springframework.messaging.simp.config;
 
+import org.springframework.lang.Nullable;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.SubscribableChannel;
 import org.springframework.messaging.simp.stomp.StompBrokerRelayMessageHandler;
@@ -41,13 +42,22 @@ public class StompBrokerRelayRegistration extends AbstractBrokerRegistration {
 
 	private String systemPasscode = "guest";
 
+	@Nullable
 	private Long systemHeartbeatSendInterval;
 
+	@Nullable
 	private Long systemHeartbeatReceiveInterval;
 
+	@Nullable
 	private String virtualHost;
 
 	private boolean autoStartup = true;
+
+	@Nullable
+	private String userDestinationBroadcast;
+
+	@Nullable
+	private String userRegistryBroadcast;
 
 
 	public StompBrokerRelayRegistration(SubscribableChannel clientInboundChannel,
@@ -166,10 +176,50 @@ public class StompBrokerRelayRegistration extends AbstractBrokerRegistration {
 		return this;
 	}
 
+	/**
+	 * Set a destination to broadcast messages to user destinations that remain
+	 * unresolved because the user appears not to be connected. In a
+	 * multi-application server scenario this gives other application servers
+	 * a chance to try.
+	 * <p>By default this is not set.
+	 * @param destination the destination to broadcast unresolved messages to,
+	 * e.g. "/topic/unresolved-user-destination"
+	 */
+	public StompBrokerRelayRegistration setUserDestinationBroadcast(String destination) {
+		this.userDestinationBroadcast = destination;
+		return this;
+	}
+
+	@Nullable
+	protected String getUserDestinationBroadcast() {
+		return this.userDestinationBroadcast;
+	}
+
+	/**
+	 * Set a destination to broadcast the content of the local user registry to
+	 * and to listen for such broadcasts from other servers. In a multi-application
+	 * server scenarios this allows each server's user registry to be aware of
+	 * users connected to other servers.
+	 * <p>By default this is not set.
+	 * @param destination the destination for broadcasting user registry details,
+	 * e.g. "/topic/simp-user-registry".
+	 */
+	public StompBrokerRelayRegistration setUserRegistryBroadcast(String destination) {
+		this.userRegistryBroadcast = destination;
+		return this;
+	}
+
+	@Nullable
+	protected String getUserRegistryBroadcast() {
+		return this.userRegistryBroadcast;
+	}
+
 
 	protected StompBrokerRelayMessageHandler getMessageHandler(SubscribableChannel brokerChannel) {
-		StompBrokerRelayMessageHandler handler = new StompBrokerRelayMessageHandler(getClientInboundChannel(),
-				getClientOutboundChannel(), brokerChannel, getDestinationPrefixes());
+
+		StompBrokerRelayMessageHandler handler = new StompBrokerRelayMessageHandler(
+				getClientInboundChannel(), getClientOutboundChannel(),
+				brokerChannel, getDestinationPrefixes());
 
 		handler.setRelayHost(this.relayHost);
 		handler.setRelayPort(this.relayPort);

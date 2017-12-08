@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2014 the original author or authors.
+ * Copyright 2002-2015 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,17 +16,28 @@
 package org.springframework.web.servlet.resource;
 
 import java.io.IOException;
+import java.net.MalformedURLException;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 import org.junit.Test;
 
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
+import org.springframework.mock.web.test.MockHttpServletRequest;
 import org.springframework.mock.web.test.MockServletContext;
 import org.springframework.web.context.support.ServletContextResource;
+import org.springframework.web.util.UrlPathHelper;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 /**
  * Unit tests for
@@ -106,6 +117,78 @@ public class PathResourceResolverTests {
 
 		assertFalse(this.resolver.checkResource(resource, classpathLocation));
 		assertTrue(this.resolver.checkResource(resource, servletContextLocation));
+	}
+
+	// SPR-12624
+	@Test
+	public void checkRelativeLocation() throws Exception {
+		String locationUrl= new UrlResource(getClass().getResource("./test/")).getURL().toExternalForm();
+		Resource location = new UrlResource(locationUrl.replace("/springframework","/../org/springframework"));
+
+		assertNotNull(this.resolver.resolveResource(null, "main.css", Arrays.asList(location), null));
+	}
+
+	// SPR-12747
+	@Test
+	public void checkFileLocation() throws Exception {
+		Resource resource = new ClassPathResource("test/main.css", PathResourceResolver.class);
+		assertTrue(this.resolver.checkResource(resource, resource));
+	}
+
+	// SPR-13241
+	@Test
+	public void resolvePathRootResource() throws Exception {
+		Resource webjarsLocation = new ClassPathResource("/META-INF/resources/webjars/", PathResourceResolver.class);
+		String path = this.resolver.resolveUrlPathInternal("", Arrays.asList(webjarsLocation), null);
+
+		assertNull(path);
+	}
+
+	@Test
+	public void relativePathEncodedForUrlResource() throws Exception {
+		TestUrlResource location = new TestUrlResource("file:///tmp");
+		List<TestUrlResource> locations = Collections.singletonList(location);
+
+		// ISO-8859-1
+		this.resolver.setUrlPathHelper(new UrlPathHelper());
+		this.resolver.setLocationCharsets(Collections.singletonMap(location, StandardCharsets.ISO_8859_1));
+		this.resolver.resolveResource(new MockHttpServletRequest(), "/Ä ;ä.txt", locations, null);
+
+		assertEquals("%C4%20%3B%E4.txt", location.getSavedRelativePath());
+
+		// UTF-8
+		this.resolver.setLocationCharsets(Collections.singletonMap(location, StandardCharsets.UTF_8));
+		this.resolver.resolveResource(new MockHttpServletRequest(), "/Ä ;ä.txt", locations, null);
+
+		assertEquals("%C3%84%20%3B%C3%A4.txt", location.getSavedRelativePath());
+
+		// UTF-8 by default
+		this.resolver.setLocationCharsets(Collections.emptyMap());
+		this.resolver.resolveResource(new MockHttpServletRequest(), "/Ä ;ä.txt", locations, null);
+
+		assertEquals("%C3%84%20%3B%C3%A4.txt", location.getSavedRelativePath());
+	}
+
+
+	private static class TestUrlResource extends UrlResource {
+
+		private String relativePath;
+
+
+		public TestUrlResource(String path) throws MalformedURLException {
+			super(path);
+		}
+
+
+		public String getSavedRelativePath() {
+			return this.relativePath;
+		}
+
+		@Override
+		public Resource createRelative(String relativePath) throws MalformedURLException {
+			this.relativePath = relativePath;
+			return this;
+		}
 	}
 
 }

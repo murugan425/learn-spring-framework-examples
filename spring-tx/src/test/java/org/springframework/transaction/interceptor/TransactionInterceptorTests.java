@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2012 the original author or authors.
+ * Copyright 2002-2015 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ import org.junit.rules.ExpectedException;
 import org.springframework.aop.framework.ProxyFactory;
 import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.NoSuchBeanDefinitionException;
+import org.springframework.lang.Nullable;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionException;
@@ -34,9 +35,6 @@ import org.springframework.util.SerializationTestUtils;
 
 import static org.junit.Assert.*;
 import static org.mockito.BDDMockito.*;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
 
 /**
  * Mock object based tests for TransactionInterceptor.
@@ -306,7 +304,7 @@ public class TransactionInterceptorTests extends AbstractTransactionAspectTests 
 	public static class SerializableTransactionManager implements PlatformTransactionManager, Serializable {
 
 		@Override
-		public TransactionStatus getTransaction(TransactionDefinition definition) throws TransactionException {
+		public TransactionStatus getTransaction(@Nullable TransactionDefinition definition) throws TransactionException {
 			throw new UnsupportedOperationException();
 		}
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2014 the original author or authors.
+ * Copyright 2002-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 
 package org.springframework.http.client;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.net.URI;
 
@@ -32,12 +33,12 @@ import org.apache.http.client.methods.HttpPut;
 import org.apache.http.client.methods.HttpTrace;
 import org.apache.http.client.methods.HttpUriRequest;
 import org.apache.http.client.protocol.HttpClientContext;
-import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.http.protocol.HttpContext;
 
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.http.HttpMethod;
+import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
 
 /**
@@ -53,12 +54,14 @@ import org.springframework.util.Assert;
  * @author Oleg Kalnichevski
  * @author Arjen Poutsma
  * @author Stephane Nicoll
+ * @author Juergen Hoeller
  * @since 3.1
  */
 public class HttpComponentsClientHttpRequestFactory implements ClientHttpRequestFactory, DisposableBean {
 
-	private CloseableHttpClient httpClient;
+	private HttpClient httpClient;
 
+	@Nullable
 	private RequestConfig requestConfig;
 
 	private boolean bufferRequestBody = true;
@@ -69,31 +72,26 @@ public class HttpComponentsClientHttpRequestFactory implements ClientHttpRequest
 	 * with a default {@link HttpClient}.
 	 */
 	public HttpComponentsClientHttpRequestFactory() {
-		this(HttpClients.createSystem());
+		this.httpClient = HttpClients.createSystem();
 	}
 
 	/**
 	 * Create a new instance of the {@code HttpComponentsClientHttpRequestFactory}
 	 * with the given {@link HttpClient} instance.
-	 * <p>As of Spring Framework 4.0, the given client is expected to be of type
-	 * {@link CloseableHttpClient} (requiring HttpClient 4.3+).
 	 * @param httpClient the HttpClient instance to use for this request factory
 	 */
 	public HttpComponentsClientHttpRequestFactory(HttpClient httpClient) {
-		Assert.notNull(httpClient, "'httpClient' must not be null");
-		Assert.isInstanceOf(CloseableHttpClient.class, httpClient, "'httpClient' is not of type CloseableHttpClient");
-		this.httpClient = (CloseableHttpClient) httpClient;
+		this.httpClient = httpClient;
 	}
 
 
 	/**
 	 * Set the {@code HttpClient} used for
-	 * <p>As of Spring Framework 4.0, the given client is expected to be of type
-	 * {@link CloseableHttpClient} (requiring HttpClient 4.3+).
+	 * {@linkplain #createRequest(URI, HttpMethod) synchronous execution}.
 	 */
 	public void setHttpClient(HttpClient httpClient) {
-		Assert.isInstanceOf(CloseableHttpClient.class, httpClient, "'httpClient' is not of type CloseableHttpClient");
-		this.httpClient = (CloseableHttpClient) httpClient;
+		Assert.notNull(httpClient, "HttpClient must not be null");
+		this.httpClient = httpClient;
 	}
 
 	/**
@@ -114,31 +112,7 @@ public class HttpComponentsClientHttpRequestFactory implements ClientHttpRequest
 	 */
 	public void setConnectTimeout(int timeout) {
 		Assert.isTrue(timeout >= 0, "Timeout must be a non-negative value");
-		this.requestConfig = cloneRequestConfig()
-				.setConnectTimeout(timeout).build();
-		setLegacyConnectionTimeout(getHttpClient(), timeout);
-	}
-
-	/**
-	 * Apply the specified connection timeout to deprecated {@link HttpClient}
-	 * implementations.
-	 * <p>As of HttpClient 4.3, default parameters have to be exposed through a
-	 * {@link RequestConfig} instance instead of setting the parameters on the
-	 * client. Unfortunately, this behavior is not backward-compatible and older
-	 * {@link HttpClient} implementations will ignore the {@link RequestConfig}
-	 * object set in the context.
-	 * <p>If the specified client is an older implementation, we set the custom
-	 * connection timeout through the deprecated API. Otherwise, we just return
-	 * as it is set through {@link RequestConfig} with newer clients.
-	 * @param client the client to configure
-	 * @param timeout the custom connection timeout
-	 */
-	@SuppressWarnings("deprecation")
-	private void setLegacyConnectionTimeout(HttpClient client, int timeout) {
-		if (org.apache.http.impl.client.AbstractHttpClient.class.isInstance(client)) {
-			client.getParams().setIntParameter(
-					org.apache.http.params.CoreConnectionPNames.CONNECTION_TIMEOUT, timeout);
-		}
+		this.requestConfig = requestConfigBuilder().setConnectTimeout(timeout).build();
 	}
 
 	/**
@@ -151,8 +125,7 @@ public class HttpComponentsClientHttpRequestFactory implements ClientHttpRequest
 	 * @see RequestConfig#getConnectionRequestTimeout()
 	 */
 	public void setConnectionRequestTimeout(int connectionRequestTimeout) {
-		this.requestConfig = cloneRequestConfig()
-				.setConnectionRequestTimeout(connectionRequestTimeout).build();
+		this.requestConfig = requestConfigBuilder().setConnectionRequestTimeout(connectionRequestTimeout).build();
 	}
 
 	/**
@@ -165,28 +138,7 @@ public class HttpComponentsClientHttpRequestFactory implements ClientHttpRequest
 	 */
 	public void setReadTimeout(int timeout) {
 		Assert.isTrue(timeout >= 0, "Timeout must be a non-negative value");
-		this.requestConfig = cloneRequestConfig()
-				.setSocketTimeout(timeout).build();
-		setLegacySocketTimeout(getHttpClient(), timeout);
-	}
-
-	/**
-	 * Apply the specified socket timeout to deprecated {@link HttpClient}
-	 * implementations. See {@link #setLegacyConnectionTimeout}.
-	 * @param client the client to configure
-	 * @param timeout the custom socket timeout
-	 * @see #setLegacyConnectionTimeout
-	 */
-	@SuppressWarnings("deprecation")
-	private void setLegacySocketTimeout(HttpClient client, int timeout) {
-		if (org.apache.http.impl.client.AbstractHttpClient.class.isInstance(client)) {
-			client.getParams().setIntParameter(
-					org.apache.http.params.CoreConnectionPNames.SO_TIMEOUT, timeout);
-		}
-	}
-
-	private RequestConfig.Builder cloneRequestConfig() {
-		return this.requestConfig != null ? RequestConfig.copy(this.requestConfig) : RequestConfig.custom();
+		this.requestConfig = requestConfigBuilder().setSocketTimeout(timeout).build();
 	}
 
 	/**
@@ -201,14 +153,15 @@ public class HttpComponentsClientHttpRequestFactory implements ClientHttpRequest
 
 	@Override
 	public ClientHttpRequest createRequest(URI uri, HttpMethod httpMethod) throws IOException {
-		CloseableHttpClient client = (CloseableHttpClient) getHttpClient();
-		Assert.state(client != null, "Synchronous execution requires an HttpClient to be set");
+		HttpClient client = getHttpClient();
+
 		HttpUriRequest httpRequest = createHttpUriRequest(httpMethod, uri);
 		postProcessHttpRequest(httpRequest);
 		HttpContext context = createHttpContext(httpMethod, uri);
 		if (context == null) {
 			context = HttpClientContext.create();
 		}
+
 		// Request configuration not set in the context
 		if (context.getAttribute(HttpClientContext.REQUEST_CONFIG) == null) {
 			// Use request configuration given by the user, when available
@@ -223,6 +176,7 @@ public class HttpComponentsClientHttpRequestFactory implements ClientHttpRequest
 				context.setAttribute(HttpClientContext.REQUEST_CONFIG, config);
 			}
 		}
+
 		if (this.bufferRequestBody) {
 			return new HttpComponentsClientHttpRequest(client, httpRequest, context);
 		}
@@ -231,16 +185,28 @@ public class HttpComponentsClientHttpRequestFactory implements ClientHttpRequest
 		}
 	}
 
+
 	/**
-	 * Create a default {@link RequestConfig} to use with the given client. Can
-	 * return {@code null} to indicate that no custom request config should be set
-	 * and the defaults of the {@link HttpClient} should be used.
-	 * <p>The default implementation tries to merge the defaults of the client with the
-	 * local customizations of this instance, if any.
-	 * @param client the client
-	 * @return the RequestConfig to use
+	 * Return a builder for modifying the factory-level {@link RequestConfig}.
+	 * @since 4.2
 	 */
-	protected RequestConfig createRequestConfig(CloseableHttpClient client) {
+	private RequestConfig.Builder requestConfigBuilder() {
+		return (this.requestConfig != null ? RequestConfig.copy(this.requestConfig) : RequestConfig.custom());
+	}
+
+	/**
+	 * Create a default {@link RequestConfig} to use with the given client.
+	 * Can return {@code null} to indicate that no custom request config should
+	 * be set and the defaults of the {@link HttpClient} should be used.
+	 * <p>The default implementation tries to merge the defaults of the client
+	 * with the local customizations of this factory instance, if any.
+	 * @param client the {@link HttpClient} (or {@code HttpAsyncClient}) to check
+	 * @return the actual RequestConfig to use (may be {@code null})
+	 * @since 4.2
+	 * @see #mergeRequestConfig(RequestConfig)
+	 */
+	@Nullable
+	protected RequestConfig createRequestConfig(Object client) {
 		if (client instanceof Configurable) {
 			RequestConfig clientRequestConfig = ((Configurable) client).getConfig();
 			return mergeRequestConfig(clientRequestConfig);
@@ -248,11 +214,19 @@ public class HttpComponentsClientHttpRequestFactory implements ClientHttpRequest
 		return this.requestConfig;
 	}
 
-	private RequestConfig mergeRequestConfig(RequestConfig defaultRequestConfig) {
-		if (this.requestConfig == null) { // nothing to merge
-			return defaultRequestConfig;
+	/**
+	 * Merge the given {@link HttpClient}-level {@link RequestConfig} with
+	 * the factory-level {@link RequestConfig}, if necessary.
+	 * @param clientConfig the config held by the current
+	 * @return the merged request config
+	 * @since 4.2
+	 */
+	protected RequestConfig mergeRequestConfig(RequestConfig clientConfig) {
+		if (this.requestConfig == null) {  // nothing to merge
+			return clientConfig;
 		}
-		RequestConfig.Builder builder = RequestConfig.copy(defaultRequestConfig);
+
+		RequestConfig.Builder builder = RequestConfig.copy(clientConfig);
 		int connectTimeout = this.requestConfig.getConnectTimeout();
 		if (connectTimeout >= 0) {
 			builder.setConnectTimeout(connectTimeout);
@@ -278,20 +252,20 @@ public class HttpComponentsClientHttpRequestFactory implements ClientHttpRequest
 		switch (httpMethod) {
 			case GET:
 				return new HttpGet(uri);
-			case DELETE:
-				return new HttpDelete(uri);
 			case HEAD:
 				return new HttpHead(uri);
-			case OPTIONS:
-				return new HttpOptions(uri);
 			case POST:
 				return new HttpPost(uri);
 			case PUT:
 				return new HttpPut(uri);
-			case TRACE:
-				return new HttpTrace(uri);
 			case PATCH:
 				return new HttpPatch(uri);
+			case DELETE:
+				return new HttpDelete(uri);
+			case OPTIONS:
+				return new HttpOptions(uri);
+			case TRACE:
+				return new HttpTrace(uri);
 			default:
 				throw new IllegalArgumentException("Invalid HTTP method: " + httpMethod);
 		}
@@ -313,6 +287,7 @@ public class HttpComponentsClientHttpRequestFactory implements ClientHttpRequest
 	 * @param uri the URI
 	 * @return the http context
 	 */
+	@Nullable
 	protected HttpContext createHttpContext(HttpMethod httpMethod, URI uri) {
 		return null;
 	}
@@ -325,7 +300,10 @@ public class HttpComponentsClientHttpRequestFactory implements ClientHttpRequest
 	 */
 	@Override
 	public void destroy() throws Exception {
-		this.httpClient.close();
+		HttpClient httpClient = getHttpClient();
+		if (httpClient instanceof Closeable) {
+			((Closeable) httpClient).close();
+		}
 	}
 
 
@@ -334,7 +312,7 @@ public class HttpComponentsClientHttpRequestFactory implements ClientHttpRequest
 	 * extends {@link org.apache.http.client.methods.HttpEntityEnclosingRequestBase}
 	 * rather than {@link org.apache.http.client.methods.HttpRequestBase} and
 	 * hence allows HTTP delete with a request body. For use with the RestTemplate
-	 * exchange methods which allow the combination of HTTP DELETE with entity.
+	 * exchange methods which allow the combination of HTTP DELETE with an entity.
 	 * @since 4.1.2
 	 */
 	private static class HttpDelete extends HttpEntityEnclosingRequestBase {
@@ -349,4 +327,5 @@ public class HttpComponentsClientHttpRequestFactory implements ClientHttpRequest
 			return "DELETE";
 		}
 	}
+
 }

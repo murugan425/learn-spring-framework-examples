@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2014 the original author or authors.
+ * Copyright 2002-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,22 +32,23 @@ import org.springframework.beans.factory.BeanDefinitionStoreException;
 import org.springframework.beans.factory.config.BeanDefinitionHolder;
 import org.springframework.beans.factory.parsing.BeanComponentDefinition;
 import org.springframework.beans.factory.support.BeanDefinitionReaderUtils;
-import org.springframework.core.env.Environment;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.ResourcePatternUtils;
+import org.springframework.lang.Nullable;
+import org.springframework.util.Assert;
 import org.springframework.util.ResourceUtils;
 import org.springframework.util.StringUtils;
 
 /**
- * Default implementation of the {@link BeanDefinitionDocumentReader} interface.
- * Reads bean definitions according to the "spring-beans" DTD and XSD format
+ * Default implementation of the {@link BeanDefinitionDocumentReader} interface that
+ * reads bean definitions according to the "spring-beans" DTD and XSD format
  * (Spring's default XML bean definition format).
  *
- * <p>The structure, elements and attribute names of the required XML document
+ * <p>The structure, elements, and attribute names of the required XML document
  * are hard-coded in this class. (Of course a transform could be run if necessary
- * to produce this format). {@code &lt;beans&gt;} doesn't need to be the root
- * element of the XML document: This class will parse all bean definition elements
- * in the XML file, not regarding the actual root element.
+ * to produce this format). {@code <beans>} does not need to be the root
+ * element of the XML document: this class will parse all bean definition elements
+ * in the XML file, regardless of the actual root element.
  *
  * @author Rod Johnson
  * @author Juergen Hoeller
@@ -76,8 +77,10 @@ public class DefaultBeanDefinitionDocumentReader implements BeanDefinitionDocume
 
 	protected final Log logger = LogFactory.getLog(getClass());
 
+	@Nullable
 	private XmlReaderContext readerContext;
 
+	@Nullable
 	private BeanDefinitionParserDelegate delegate;
 
 
@@ -99,13 +102,15 @@ public class DefaultBeanDefinitionDocumentReader implements BeanDefinitionDocume
 	 * Return the descriptor for the XML resource that this parser works on.
 	 */
 	protected final XmlReaderContext getReaderContext() {
+		Assert.state(this.readerContext != null, "No XmlReaderContext available");
 		return this.readerContext;
 	}
 
 	/**
-	 * Invoke the {@link org.springframework.beans.factory.parsing.SourceExtractor} to pull the
-	 * source metadata from the supplied {@link Element}.
+	 * Invoke the {@link org.springframework.beans.factory.parsing.SourceExtractor}
+	 * to pull the source metadata from the supplied {@link Element}.
 	 */
+	@Nullable
 	protected Object extractSource(Element ele) {
 		return getReaderContext().extractSource(ele);
 	}
@@ -130,6 +135,10 @@ public class DefaultBeanDefinitionDocumentReader implements BeanDefinitionDocume
 				String[] specifiedProfiles = StringUtils.tokenizeToStringArray(
 						profileSpec, BeanDefinitionParserDelegate.MULTI_VALUE_ATTRIBUTE_DELIMITERS);
 				if (!getReaderContext().getEnvironment().acceptsProfiles(specifiedProfiles)) {
+					if (logger.isInfoEnabled()) {
+						logger.info("Skipped XML bean definition file due to specified profiles [" + profileSpec +
+								"] not matching: " + getReaderContext().getResource());
+					}
 					return;
 				}
 			}
@@ -143,7 +152,7 @@ public class DefaultBeanDefinitionDocumentReader implements BeanDefinitionDocume
 	}
 
 	protected BeanDefinitionParserDelegate createDelegate(
-			XmlReaderContext readerContext, Element root, BeanDefinitionParserDelegate parentDelegate) {
+			XmlReaderContext readerContext, Element root, @Nullable BeanDefinitionParserDelegate parentDelegate) {
 
 		BeanDefinitionParserDelegate delegate = new BeanDefinitionParserDelegate(readerContext);
 		delegate.initDefaults(root, parentDelegate);
@@ -206,7 +215,7 @@ public class DefaultBeanDefinitionDocumentReader implements BeanDefinitionDocume
 		// Resolve system properties: e.g. "${user.dir}"
 		location = getReaderContext().getEnvironment().resolveRequiredPlaceholders(location);
 
-		Set<Resource> actualResources = new LinkedHashSet<Resource>(4);
+		Set<Resource> actualResources = new LinkedHashSet<>(4);
 
 		// Discover whether the location is an absolute or relative URI
 		boolean absoluteLocation = false;

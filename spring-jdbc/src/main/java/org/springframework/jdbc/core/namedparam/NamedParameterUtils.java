@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2013 the original author or authors.
+ * Copyright 2002-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ import java.util.Set;
 import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.jdbc.core.SqlParameter;
 import org.springframework.jdbc.core.SqlParameterValue;
+import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
 
 /**
@@ -74,9 +75,9 @@ public abstract class NamedParameterUtils {
 	public static ParsedSql parseSqlStatement(final String sql) {
 		Assert.notNull(sql, "SQL must not be null");
 
-		Set<String> namedParameters = new HashSet<String>();
+		Set<String> namedParameters = new HashSet<>();
 		String sqlToUse = sql;
-		List<ParameterHolder> parameterList = new ArrayList<ParameterHolder>();
+		List<ParameterHolder> parameterList = new ArrayList<>();
 
 		char[] statement = sql.toCharArray();
 		int namedParameterCount = 0;
@@ -103,7 +104,7 @@ public abstract class NamedParameterUtils {
 			if (c == ':' || c == '&') {
 				int j = i + 1;
 				if (j < statement.length && statement[j] == ':' && c == ':') {
-					// Postgres-style "::" casting operator - to be skipped.
+					// Postgres-style "::" casting operator should be skipped
 					i = i + 2;
 					continue;
 				}
@@ -144,7 +145,7 @@ public abstract class NamedParameterUtils {
 				if (c == '\\') {
 					int j = i + 1;
 					if (j < statement.length && statement[j] == ':') {
-						// this is an escaped : and should be skipped
+						// escaped ":" should be skipped
 						sqlToUse = sqlToUse.substring(0, i - escapes) + sqlToUse.substring(i - escapes + 1);
 						escapes++;
 						i = i + 2;
@@ -152,6 +153,12 @@ public abstract class NamedParameterUtils {
 					}
 				}
 				if (c == '?') {
+					int j = i + 1;
+					if (j < statement.length && (statement[j] == '?' || statement[j] == '|' || statement[j] == '&')) {
+						// Postgres-style "??", "?|", "?&" operator should be skipped
+						i = i + 2;
+						continue;
+					}
 					unnamedParameterCount++;
 					totalParameterCount++;
 				}
@@ -249,10 +256,13 @@ public abstract class NamedParameterUtils {
 	 * @return the SQL statement with substituted parameters
 	 * @see #parseSqlStatement
 	 */
-	public static String substituteNamedParameters(ParsedSql parsedSql, SqlParameterSource paramSource) {
+	public static String substituteNamedParameters(ParsedSql parsedSql, @Nullable SqlParameterSource paramSource) {
 		String originalSql = parsedSql.getOriginalSql();
-		StringBuilder actualSql = new StringBuilder();
 		List<String> paramNames = parsedSql.getParameterNames();
+		if (paramNames.isEmpty()) {
+			return originalSql;
+		}
+		StringBuilder actualSql = new StringBuilder(originalSql.length());
 		int lastIndex = 0;
 		for (int i = 0; i < paramNames.size(); i++) {
 			String paramName = paramNames.get(i);
@@ -276,26 +286,26 @@ public abstract class NamedParameterUtils {
 						Object entryItem = entryIter.next();
 						if (entryItem instanceof Object[]) {
 							Object[] expressionList = (Object[]) entryItem;
-							actualSql.append("(");
+							actualSql.append('(');
 							for (int m = 0; m < expressionList.length; m++) {
 								if (m > 0) {
 									actualSql.append(", ");
 								}
-								actualSql.append("?");
+								actualSql.append('?');
 							}
-							actualSql.append(")");
+							actualSql.append(')');
 						}
 						else {
-							actualSql.append("?");
+							actualSql.append('?');
 						}
 					}
 				}
 				else {
-					actualSql.append("?");
+					actualSql.append('?');
 				}
 			}
 			else {
-				actualSql.append("?");
+				actualSql.append('?');
 			}
 			lastIndex = endIndex;
 		}
@@ -313,7 +323,7 @@ public abstract class NamedParameterUtils {
 	 * @return the array of values
 	 */
 	public static Object[] buildValueArray(
-			ParsedSql parsedSql, SqlParameterSource paramSource, List<SqlParameter> declaredParams) {
+			ParsedSql parsedSql, SqlParameterSource paramSource, @Nullable List<SqlParameter> declaredParams) {
 
 		Object[] paramArray = new Object[parsedSql.getTotalParameterCount()];
 		if (parsedSql.getNamedParameterCount() > 0 && parsedSql.getUnnamedParameterCount() > 0) {
@@ -346,7 +356,10 @@ public abstract class NamedParameterUtils {
 	 * @param paramIndex the index of the desired parameter
 	 * @return the declared SqlParameter, or {@code null} if none found
 	 */
-	private static SqlParameter findParameter(List<SqlParameter> declaredParams, String paramName, int paramIndex) {
+	@Nullable
+	private static SqlParameter findParameter(
+			@Nullable List<SqlParameter> declaredParams, String paramName, int paramIndex) {
+
 		if (declaredParams != null) {
 			// First pass: Look for named parameter match.
 			for (SqlParameter declaredParam : declaredParams) {
@@ -410,9 +423,10 @@ public abstract class NamedParameterUtils {
 	 */
 	public static List<SqlParameter> buildSqlParameterList(ParsedSql parsedSql, SqlParameterSource paramSource) {
 		List<String> paramNames = parsedSql.getParameterNames();
-		List<SqlParameter> params = new LinkedList<SqlParameter>();
+		List<SqlParameter> params = new LinkedList<>();
 		for (String paramName : paramNames) {
-			params.add(new SqlParameter(paramName, paramSource.getSqlType(paramName), paramSource.getTypeName(paramName)));
+			params.add(
+					new SqlParameter(paramName, paramSource.getSqlType(paramName), paramSource.getTypeName(paramName)));
 		}
 		return params;
 	}

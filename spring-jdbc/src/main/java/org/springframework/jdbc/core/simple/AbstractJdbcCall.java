@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2014 the original author or authors.
+ * Copyright 2002-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.SqlParameter;
 import org.springframework.jdbc.core.metadata.CallMetaDataContext;
 import org.springframework.jdbc.core.namedparam.SqlParameterSource;
+import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 
@@ -58,24 +59,26 @@ public abstract class AbstractJdbcCall {
 	private final CallMetaDataContext callMetaDataContext = new CallMetaDataContext();
 
 	/** List of SqlParameter objects */
-	private final List<SqlParameter> declaredParameters = new ArrayList<SqlParameter>();
+	private final List<SqlParameter> declaredParameters = new ArrayList<>();
 
 	/** List of RefCursor/ResultSet RowMapper objects */
-	private final Map<String, RowMapper<?>> declaredRowMappers = new LinkedHashMap<String, RowMapper<?>>();
+	private final Map<String, RowMapper<?>> declaredRowMappers = new LinkedHashMap<>();
 
 	/**
 	 * Has this operation been compiled? Compilation means at least checking
 	 * that a DataSource or JdbcTemplate has been provided.
 	 */
-	private boolean compiled = false;
+	private volatile boolean compiled = false;
 
 	/** The generated string used for call statement */
+	@Nullable
 	private String callString;
 
 	/**
 	 * A delegate enabling us to create CallableStatementCreators
 	 * efficiently, based on this class's declared parameters.
 	 */
+	@Nullable
 	private CallableStatementCreatorFactory callableStatementFactory;
 
 
@@ -107,13 +110,14 @@ public abstract class AbstractJdbcCall {
 	/**
 	 * Set the name of the stored procedure.
 	 */
-	public void setProcedureName(String procedureName) {
+	public void setProcedureName(@Nullable String procedureName) {
 		this.callMetaDataContext.setProcedureName(procedureName);
 	}
 
 	/**
 	 * Get the name of the stored procedure.
 	 */
+	@Nullable
 	public String getProcedureName() {
 		return this.callMetaDataContext.getProcedureName();
 	}
@@ -135,13 +139,14 @@ public abstract class AbstractJdbcCall {
 	/**
 	 * Set the catalog name to use.
 	 */
-	public void setCatalogName(String catalogName) {
+	public void setCatalogName(@Nullable String catalogName) {
 		this.callMetaDataContext.setCatalogName(catalogName);
 	}
 
 	/**
 	 * Get the catalog name used.
 	 */
+	@Nullable
 	public String getCatalogName() {
 		return this.callMetaDataContext.getCatalogName();
 	}
@@ -149,13 +154,14 @@ public abstract class AbstractJdbcCall {
 	/**
 	 * Set the schema name to use.
 	 */
-	public void setSchemaName(String schemaName) {
+	public void setSchemaName(@Nullable String schemaName) {
 		this.callMetaDataContext.setSchemaName(schemaName);
 	}
 
 	/**
 	 * Get the schema name used.
 	 */
+	@Nullable
 	public String getSchemaName() {
 		return this.callMetaDataContext.getSchemaName();
 	}
@@ -191,6 +197,23 @@ public abstract class AbstractJdbcCall {
 	}
 
 	/**
+	 * Specify whether parameters should be bound by name.
+	 * The default is {@code false}.
+	 * @since 4.2
+	 */
+	public void setNamedBinding(boolean namedBinding) {
+		this.callMetaDataContext.setNamedBinding(namedBinding);
+	}
+
+	/**
+	 * Should parameters be bound by name?
+	 * @since 4.2
+	 */
+	public boolean isNamedBinding() {
+		return this.callMetaDataContext.isNamedBinding();
+	}
+
+	/**
 	 * Specify whether the parameter metadata for the call should be used.
 	 * The default is {@code true}.
 	 */
@@ -201,6 +224,7 @@ public abstract class AbstractJdbcCall {
 	/**
 	 * Get the call string that should be used based on parameters and meta data.
 	 */
+	@Nullable
 	public String getCallString() {
 		return this.callString;
 	}
@@ -209,6 +233,7 @@ public abstract class AbstractJdbcCall {
 	 * Get the {@link CallableStatementCreatorFactory} being used
 	 */
 	protected CallableStatementCreatorFactory getCallableStatementFactory() {
+		Assert.state(this.callableStatementFactory != null, "No CallableStatementCreatorFactory available");
 		return this.callableStatementFactory;
 	}
 
@@ -283,7 +308,9 @@ public abstract class AbstractJdbcCall {
 	 * Invoked after this base class's compilation is complete.
 	 */
 	protected void compileInternal() {
-		this.callMetaDataContext.initializeMetaData(getJdbcTemplate().getDataSource());
+		DataSource dataSource = getJdbcTemplate().getDataSource();
+		Assert.state(dataSource != null, "No DataSource set");
+		this.callMetaDataContext.initializeMetaData(dataSource);
 
 		// Iterate over the declared RowMappers and register the corresponding SqlParameter
 		for (Map.Entry<String, RowMapper<?>> entry : this.declaredRowMappers.entrySet()) {
@@ -299,8 +326,7 @@ public abstract class AbstractJdbcCall {
 		}
 
 		this.callableStatementFactory =
-				new CallableStatementCreatorFactory(getCallString(), this.callMetaDataContext.getCallParameters());
-		this.callableStatementFactory.setNativeJdbcExtractor(getJdbcTemplate().getNativeJdbcExtractor());
+				new CallableStatementCreatorFactory(this.callString, this.callMetaDataContext.getCallParameters());
 
 		onCompileInternal();
 	}
@@ -314,7 +340,7 @@ public abstract class AbstractJdbcCall {
 
 	/**
 	 * Is this operation "compiled"?
-	 * @return whether this operation is compiled, and ready to use.
+	 * @return whether this operation is compiled and ready to use
 	 */
 	public boolean isCompiled() {
 		return this.compiled;
@@ -393,6 +419,7 @@ public abstract class AbstractJdbcCall {
 	 * Get the name of a single out parameter or return value.
 	 * Used for functions or procedures with one out parameter.
 	 */
+	@Nullable
 	protected String getScalarOutParameterName() {
 		return this.callMetaDataContext.getScalarOutParameterName();
 	}
